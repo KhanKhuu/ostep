@@ -1,0 +1,11 @@
+add_executable(main-deadlock-global main-deadlock-global.c)
+add_executable(main-deadlock main-deadlock.c)
+add_executable(main-race main-race.c)
+add_executable(main-signal-cv main-signal-cv.c)
+add_executable(main-signal main-signal.c)
+
+target_link_libraries(main-deadlock-global pthread)
+target_link_libraries(main-deadlock pthread)
+target_link_libraries(main-race pthread)
+target_link_libraries(main-signal-cv pthread)
+target_link_libraries(main-signal pthread)

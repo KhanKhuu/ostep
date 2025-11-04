@@ -7,3 +7,4 @@ set(CMAKE_C_STANDARD_REQUIRED ON)
 set(CMAKE_C_EXTENSIONS OFF)
 
 add_subdirectory(examples)
+add_subdirectory(homework)
