@@ -4,12 +4,14 @@
 
 int balance = 0;
 
-void* worker(void* arg) {
-    balance++; // unprotected access 
+void *worker(void *arg)
+{
+    // balance++; // unprotected access
     return NULL;
 }
 
-int main(int argc, char *argv[]) {
+int main(int argc, char *argv[])
+{
     pthread_t p;
     Pthread_create(&p, NULL, worker, NULL);
     balance++; // unprotected access
