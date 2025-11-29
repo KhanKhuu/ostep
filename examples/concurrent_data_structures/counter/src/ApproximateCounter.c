@@ -31,7 +31,7 @@ static tCounter_instance *ApproximateCounter_create(const tCounter_instance *iBa
     uint32_t aThread;
     uint32_t aThreshold;
     uint32_t aThreads;
-    tApproximateCounter_Options *aOptionsPtr;
+    tApproximateCounter_options *aOptionsPtr;
     tApproximateCounter_instance *aCounterPtr;
 
     assert(iBasePtr != NULL); // required parameter
@@ -39,7 +39,7 @@ static tCounter_instance *ApproximateCounter_create(const tCounter_instance *iBa
     // get options
     if (iOptionsPtr != NULL)
     {
-        aOptionsPtr = (tApproximateCounter_Options *)iOptionsPtr;
+        aOptionsPtr = (tApproximateCounter_options *)iOptionsPtr;
         aThreshold = aOptionsPtr->mThreshold;
         aThreads = aOptionsPtr->mThreads;
     }

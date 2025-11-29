@@ -10,12 +10,12 @@
 /**
  * @brief Thread worker context.
  */
-typedef struct __BenchCounter_workerContext_t
+typedef struct __tBenchCounter_context
 {
     uint32_t mThread;               // Thread ID (unique among the workers in a workload)
     uint32_t mNumIncrements;        // Number of times to increment the counter
-    ApproximateCounter_t *mCounter; // Shared counter for all threads to increment
-} BenchCounter_workerContext_t;
+    tCounter_instance *mCounterPtr; // Shared counter for all threads to increment
+} tBenchCounter_context;
 
 /**
  * @brief Thread worker method.
@@ -30,22 +30,22 @@ void *BenchCounter_worker(void *ioWorkerContext)
     uint32_t aIncrement;
     uint32_t aNumIncrements;
     uint32_t aThread;
-    ApproximateCounter_t *aCounter;
-    BenchCounter_workerContext_t *aWorkerContext;
+    tCounter_instance *aCounterPtr;
+    tBenchCounter_context *aWorkerContext;
 
-    aWorkerContext = (BenchCounter_workerContext_t *)ioWorkerContext;
+    aWorkerContext = (tBenchCounter_context *)ioWorkerContext;
 
     aThread = aWorkerContext->mThread;
-    aCounter = aWorkerContext->mCounter;
+    aCounterPtr = aWorkerContext->mCounterPtr;
     aNumIncrements = aWorkerContext->mNumIncrements;
 
     for (aIncrement = 0; aIncrement < aNumIncrements; ++aIncrement)
     {
-        ApproximateCounter_update(aCounter, aThread, 1);
+        gApproximateCounter_interface.mIncrementPtr(aCounterPtr, aThread, 1);
     }
 
-    ApproximateCounter_flush(aCounter, aThread); // flush the remaining local count
-                                                 // to the global count
+    gApproximateCounter_interface.mFlushPtr(aCounterPtr, aThread); // flush the remaining local count
+                                                                   // to the global count
     return NULL;
 }
 
@@ -70,15 +70,15 @@ static inline double now_ms()
  * This function runs the workload under measurement. It creates each thread
  * and waits for all threads to finish running.
  *
- * @param iCounterDriverThread Uninitialized thread objects to create and run.
- * @param iCounterDriverInput Context for each thread worker containing counter and
- *                            thread id.
+ * @param iCounterDriverThreadPtr Uninitialized thread objects to create and run.
+ * @param iCounterDriverContextPtr Context for each thread worker containing counter
+ *                                 instance and thread id.
  * @param iNumThreads Number of threads to create and run.
  *
  * @return uint32_t Measured run-time of the workload.
  */
-uint32_t BenchCounter_runWorkload(pthread_t *iCounterDriverThread,
-                                  BenchCounter_workerContext_t *iCounterDriverInput,
+uint32_t BenchCounter_runWorkload(pthread_t *iCounterDriverThreadPtr,
+                                  tBenchCounter_context *iCounterDriverContextPtr,
                                   uint32_t iNumThreads)
 {
     uint32_t aStatusCode;
@@ -87,17 +87,17 @@ uint32_t BenchCounter_runWorkload(pthread_t *iCounterDriverThread,
     // Kick off the threads
     for (aThread = 0; aThread < iNumThreads; ++aThread)
     {
-        aStatusCode = pthread_create(&iCounterDriverThread[aThread],
+        aStatusCode = pthread_create(&iCounterDriverThreadPtr[aThread],
                                      NULL,
                                      BenchCounter_worker,
-                                     &iCounterDriverInput[aThread]);
+                                     &iCounterDriverContextPtr[aThread]);
         assert(aStatusCode == 0);
     }
 
     // Wait for threads to finish
     for (aThread = 0; aThread < iNumThreads; ++aThread)
     {
-        aStatusCode = pthread_join(iCounterDriverThread[aThread],
+        aStatusCode = pthread_join(iCounterDriverThreadPtr[aThread],
                                    NULL);
         assert(aStatusCode == 0);
     }
@@ -138,53 +138,55 @@ uint32_t BenchCounter_benchApproximateCounter(uint8_t iNumThreads,
     double aRuntime;
     double aT0;
     double aT1;
-    pthread_t *aCounterDriverThread;
-    BenchCounter_workerContext_t *aWorkerContext;
-    ApproximateCounter_t *aCounter;
+    pthread_t *aCounterDriverThreadPtr;
+    tBenchCounter_context *aContextPtr;
+    tCounter_instance aBasePtr;
+    tCounter_instance *aCounterPtr;
+    tApproximateCounter_options aOptions;
 
     // Allocate heap scratch
-    aCounterDriverThread = malloc(iNumThreads * sizeof(pthread_t));
-    aWorkerContext = malloc(iNumThreads * sizeof(BenchCounter_workerContext_t));
-    aCounter = (ApproximateCounter_t *)malloc(sizeof(ApproximateCounter_t));
+    aCounterDriverThreadPtr = malloc(iNumThreads * sizeof(pthread_t));
+    aContextPtr = malloc(iNumThreads * sizeof(tBenchCounter_context));
 
-    // Initialize counter
-    ApproximateCounterInitParams_t aInitParams;
-    aInitParams.mThreshold = iThreshold;
-    aInitParams.mThreads = iNumThreads;
-    ApproximateCounter_init(aCounter, &aInitParams);
+    // Create counter
+    aBasePtr.mCounterId = 0;
+    aOptions.mThreshold = iThreshold;
+    aOptions.mThreads = iNumThreads;
+    aCounterPtr = gApproximateCounter_interface.mCreatePtr(&aBasePtr, &aOptions);
 
     // Set up counter driver worker thread inputs
     for (aThread = 0; aThread < iNumThreads; ++aThread)
     {
-        aWorkerContext[aThread].mThread = aThread;
-        aWorkerContext[aThread].mNumIncrements = iNumIncrements;
-        aWorkerContext[aThread].mCounter = aCounter;
+        aContextPtr[aThread].mThread = aThread;
+        aContextPtr[aThread].mNumIncrements = iNumIncrements;
+        aContextPtr[aThread].mCounterPtr = aCounterPtr;
     }
 
     // Warm-up Runs
     for (aRun = 0; aRun < iNumWarmups; ++aRun)
     {
-        BenchCounter_runWorkload(aCounterDriverThread, aWorkerContext, iNumThreads);
-        ApproximateCounter_reset(aCounter);
+        BenchCounter_runWorkload(aCounterDriverThreadPtr, aContextPtr, iNumThreads);
+        gApproximateCounter_interface.mResetPtr(aCounterPtr);
     }
 
     // Hot Runs
     for (aRun = 0; aRun < iNumHotRuns; ++aRun)
     {
         aT0 = now_ms();
-        BenchCounter_runWorkload(aCounterDriverThread, aWorkerContext, iNumThreads);
+        BenchCounter_runWorkload(aCounterDriverThreadPtr, aContextPtr, iNumThreads);
         aT1 = now_ms();
 
         aRuntime = aT1 - aT0;
-        aGlobalCount = ApproximateCounter_get(aCounter);
+        gApproximateCounter_interface.mGetPtr(aCounterPtr, &aGlobalCount);
         printf("Global Count: %u\nRun Time: %f\n", aGlobalCount, aRuntime);
 
-        ApproximateCounter_reset(aCounter);
+        gApproximateCounter_interface.mResetPtr(aCounterPtr);
     }
 
-    free(aCounter);
-    free(aCounterDriverThread);
-    free(aWorkerContext);
+    // free memory
+    gApproximateCounter_interface.mDestroyPtr(aCounterPtr);
+    free(aCounterDriverThreadPtr);
+    free(aContextPtr);
 
     return 0;
 }

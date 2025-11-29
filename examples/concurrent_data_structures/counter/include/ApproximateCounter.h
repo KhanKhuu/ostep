@@ -12,7 +12,7 @@ typedef struct
 {
     uint32_t mThreshold; // Local counter threshold before flushing to global
     uint32_t mThreads;   // Number of threads that will use this counter
-} tApproximateCounter_Options;
+} tApproximateCounter_options;
 
 /**
  * @brief Global ApproximateCounter interface. Defined in ApproximateCounter.c.
