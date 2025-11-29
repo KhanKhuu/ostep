@@ -1,6 +1,8 @@
 #ifndef COUNTER_API_H
 #define COUNTER_API_H
 
+#include <stdint.h>
+
 /**
  * @brief The first field of every counter instance must be this "base" class.
  */
@@ -18,7 +20,7 @@ typedef struct
  *                    the counter implementation.
  * @return Pointer to a new counter instance.
  */
-typedef tCounter_instance *(tCounter_create)(tCounter_instance * iBasePtr,
+typedef tCounter_instance *(tCounter_create)(const tCounter_instance *iBasePtr,
                                              const void *iOptionsPtr);
 
 /**
@@ -44,7 +46,7 @@ typedef void(tCounter_reset)(tCounter_instance *ioInstancePtr);
  * @param iThread Local thread ID.
  */
 typedef void(tCounter_flush)(tCounter_instance *ioInstancePtr,
-                             uint32_t iThread);
+                             const uint32_t iThread);
 
 /**
  * @brief Increment a counter.
@@ -53,7 +55,8 @@ typedef void(tCounter_flush)(tCounter_instance *ioInstancePtr,
  * @param iThread Local thread ID (only used by multi-lock counters).
  */
 typedef void(tCounter_increment)(tCounter_instance *ioInstancePtr,
-                                 uint32_t iThread);
+                                 const uint32_t iThread,
+                                 const uint32_t iAmount);
 
 /**
  * @brief Get a counter's count.
