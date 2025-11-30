@@ -96,3 +96,7 @@ pids
 # Temporary folders
 tmp/
 temp/
+
+# Local Benchmark Analysis
+counter_benchmarks
+
