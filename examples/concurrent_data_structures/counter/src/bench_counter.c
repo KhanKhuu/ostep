@@ -1,4 +1,5 @@
 #include <assert.h>
+#include <getopt.h>
 #include <pthread.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -6,6 +7,7 @@
 #include <string.h>
 #include <sys/stat.h>
 #include <time.h>
+#include <unistd.h>
 
 #include <ApproximateCounter.h>
 #include <TraditionalCounter.h>
@@ -40,6 +42,33 @@ typedef struct __tBenchCounter_context
     tCounter_instance *mCounterPtr;          // Shared counter for all threads to increment
     const tCounter_interface *mInterfacePtr; // Interface to use with the counter instance
 } tBenchCounter_context;
+
+/**
+ * @brief Arguments for sweep_threads subcommand.
+ */
+typedef struct
+{
+    uint32_t mMinThreads; // Minimum number of threads
+    uint32_t mMaxThreads; // Maximum number of threads
+    uint32_t mStep;       // Step size for thread increments
+    uint32_t mThreshold;  // Threshold for approximate counter
+    uint32_t mIncrements; // Number of increments per thread
+    uint32_t mWarmups;    // Number of warmup runs
+    uint32_t mHotruns;    // Number of hot runs
+} tBenchCounter_sweepThreadsArgs;
+
+/**
+ * @brief Arguments for sweep_threshold subcommand.
+ */
+typedef struct
+{
+    uint32_t mNumThreads;     // Number of threads (constant)
+    uint32_t mStartThreshold; // Starting threshold value
+    uint32_t mSteps;          // Number of threshold steps (multiply by 2 each step)
+    uint32_t mIncrements;     // Number of increments per thread
+    uint32_t mWarmups;        // Number of warmup runs
+    uint32_t mHotruns;        // Number of hot runs
+} tBenchCounter_sweepThresholdArgs;
 
 /**
  * @brief Thread worker method.
@@ -233,16 +262,13 @@ uint32_t BenchCounter_benchApproximateCounter(uint8_t iNumThreads,
     return 0;
 }
 
-int main(int argc, const char **argv)
+/**
+ * @brief Execute sweep_threads subcommand.
+ *
+ * Sweeps across different thread counts while keeping threshold constant.
+ */
+int BenchCounter_sweepThreads(const tBenchCounter_sweepThreadsArgs *iArgsPtr)
 {
-    printf("Welcome to Concurrent Counter Driver\n");
-
-    // Parameters for benchmark
-    uint32_t aThreshold = 4096;
-    uint32_t aNumHotRuns = 30;
-    uint8_t aThreadCounts[] = {1, 2, 4, 8, 16};
-    int aNumThreadSweeps = sizeof(aThreadCounts) / sizeof(aThreadCounts[0]);
-
     // Get current wall-clock time for folder and file naming
     time_t aRawtime;
     struct tm *aTimeinfoPtr;
@@ -264,9 +290,9 @@ int main(int argc, const char **argv)
         return 1;
     }
 
-    // Create CSV filename with parameters (removed threads since it varies)
-    snprintf(aFilename, sizeof(aFilename), "bench_threshold%u_hotruns%u.csv",
-             aThreshold, aNumHotRuns);
+    // Create CSV filename for thread sweep
+    snprintf(aFilename, sizeof(aFilename), "sweep_threads_threshold%u_increments%u_warmups%u_hotruns%u.csv",
+             iArgsPtr->mThreshold, iArgsPtr->mIncrements, iArgsPtr->mWarmups, iArgsPtr->mHotruns);
     snprintf(aFilepath, sizeof(aFilepath), "%s/%s", aFolderName, aFilename);
 
     // Open CSV file for writing
@@ -281,16 +307,250 @@ int main(int argc, const char **argv)
     fprintf(aOutputFilePtr, "counter,n_threads,threshold,time (ms),final_count\n");
 
     // Run parameter sweep across different thread counts
-    for (int i = 0; i < aNumThreadSweeps; i++)
+    for (uint32_t aThreads = iArgsPtr->mMinThreads; aThreads <= iArgsPtr->mMaxThreads; aThreads += iArgsPtr->mStep)
     {
-        printf("Running benchmark with %u threads...\n", aThreadCounts[i]);
-        BenchCounter_benchApproximateCounter(aThreadCounts[i], aThreshold, 1000000, 15, aNumHotRuns, aOutputFilePtr);
+        printf("Running benchmark with %u threads...\n", aThreads);
+        BenchCounter_benchApproximateCounter(aThreads, iArgsPtr->mThreshold, iArgsPtr->mIncrements,
+                                             iArgsPtr->mWarmups, iArgsPtr->mHotruns, aOutputFilePtr);
         fflush(aOutputFilePtr); // Ensure data is written after each run
     }
 
     // Close file and cleanup
     fclose(aOutputFilePtr);
 
-    printf("Parameter sweep completed. Results written to: %s\n", aFilepath);
+    printf("Thread sweep completed. Results written to: %s\n", aFilepath);
     return 0;
+}
+
+/**
+ * @brief Execute sweep_threshold subcommand.
+ *
+ * Sweeps across different threshold values while keeping thread count constant.
+ */
+int BenchCounter_sweepThreshold(const tBenchCounter_sweepThresholdArgs *iArgsPtr)
+{
+    // Get current wall-clock time for folder and file naming
+    time_t aRawtime;
+    struct tm *aTimeinfoPtr;
+    char aTimestamp[64];
+    char aFolderName[128];
+    char aFilename[256];
+    char aFilepath[384];
+    FILE *aOutputFilePtr;
+
+    time(&aRawtime);
+    aTimeinfoPtr = localtime(&aRawtime);
+    strftime(aTimestamp, sizeof(aTimestamp), "%Y%m%d_%H%M%S", aTimeinfoPtr);
+
+    // Create benchmark folder
+    snprintf(aFolderName, sizeof(aFolderName), "benchmark_%s", aTimestamp);
+    if (mkdir(aFolderName, 0755) != 0)
+    {
+        perror("Failed to create benchmark directory");
+        return 1;
+    }
+
+    // Create CSV filename for threshold sweep
+    snprintf(aFilename, sizeof(aFilename), "sweep_threshold_threads%u_increments%u_warmups%u_hotruns%u.csv",
+             iArgsPtr->mNumThreads, iArgsPtr->mIncrements, iArgsPtr->mWarmups, iArgsPtr->mHotruns);
+    snprintf(aFilepath, sizeof(aFilepath), "%s/%s", aFolderName, aFilename);
+
+    // Open CSV file for writing
+    aOutputFilePtr = fopen(aFilepath, "w");
+    if (aOutputFilePtr == NULL)
+    {
+        perror("Failed to create output file");
+        return 1;
+    }
+
+    // Write CSV header
+    fprintf(aOutputFilePtr, "counter,n_threads,threshold,time (ms),final_count\n");
+
+    // Run parameter sweep across different threshold values
+    uint32_t aThreshold = iArgsPtr->mStartThreshold;
+    for (uint32_t aStep = 0; aStep < iArgsPtr->mSteps; ++aStep)
+    {
+        printf("Running benchmark with threshold %u...\n", aThreshold);
+        BenchCounter_benchApproximateCounter(iArgsPtr->mNumThreads, aThreshold, iArgsPtr->mIncrements,
+                                             iArgsPtr->mWarmups, iArgsPtr->mHotruns, aOutputFilePtr);
+        fflush(aOutputFilePtr); // Ensure data is written after each run
+        aThreshold *= 2;        // Multiply by 2 for next step
+    }
+
+    // Close file and cleanup
+    fclose(aOutputFilePtr);
+
+    printf("Threshold sweep completed. Results written to: %s\n", aFilepath);
+    return 0;
+}
+
+/**
+ * @brief Print usage information.
+ */
+void BenchCounter_printUsage(const char *aProgramNamePtr)
+{
+    printf("Usage: %s <subcommand> [options]\n\n", aProgramNamePtr);
+    printf("Subcommands:\n");
+    printf("  sweep_threads   - Sweep across different thread counts\n");
+    printf("  sweep_threshold - Sweep across different threshold values\n\n");
+
+    printf("sweep_threads options:\n");
+    printf("  --min-threads <n>    Minimum number of threads (default: 1)\n");
+    printf("  --max-threads <n>    Maximum number of threads (default: 16)\n");
+    printf("  --step <n>           Step size for thread increments (default: 1)\n");
+    printf("  --threshold <n>      Threshold for approximate counter (default: 4096)\n");
+    printf("  --increments <n>     Number of increments per thread (default: 100000)\n");
+    printf("  --warmups <n>        Number of warmup runs (default: 15)\n");
+    printf("  --hotruns <n>        Number of hot runs (default: 30)\n\n");
+
+    printf("sweep_threshold options:\n");
+    printf("  --num-threads <n>      Number of threads (constant) (default: 8)\n");
+    printf("  --start-threshold <n>  Starting threshold value (default: 1)\n");
+    printf("  --steps <n>            Number of threshold steps (default: 16)\n");
+    printf("  --increments <n>       Number of increments per thread (default: 100000)\n");
+    printf("  --warmups <n>          Number of warmup runs (default: 15)\n");
+    printf("  --hotruns <n>          Number of hot runs (default: 30)\n");
+}
+
+int main(int argc, char **argv)
+{
+    printf("Welcome to Concurrent Counter Driver\n");
+
+    if (argc < 2)
+    {
+        BenchCounter_printUsage(argv[0]);
+        return 1;
+    }
+
+    const char *aSubcommandPtr = argv[1];
+
+    if (strcmp(aSubcommandPtr, "sweep_threads") == 0)
+    {
+        tBenchCounter_sweepThreadsArgs aArgs = {
+            .mMinThreads = 1,
+            .mMaxThreads = 16,
+            .mStep = 1,
+            .mThreshold = 4096,
+            .mIncrements = 100000,
+            .mWarmups = 15,
+            .mHotruns = 30};
+
+        static struct option aLongOptions[] = {
+            {"min-threads", required_argument, 0, 0},
+            {"max-threads", required_argument, 0, 1},
+            {"step", required_argument, 0, 2},
+            {"threshold", required_argument, 0, 3},
+            {"increments", required_argument, 0, 4},
+            {"warmups", required_argument, 0, 5},
+            {"hotruns", required_argument, 0, 6},
+            {"help", no_argument, 0, 'h'},
+            {0, 0, 0, 0}};
+
+        int aOptionIndex = 0;
+        int aC;
+        optind = 2; // Skip program name and subcommand
+
+        while ((aC = getopt_long(argc, argv, "h", aLongOptions, &aOptionIndex)) != -1)
+        {
+            switch (aC)
+            {
+            case 0:
+                aArgs.mMinThreads = (uint32_t)atoi(optarg);
+                break;
+            case 1:
+                aArgs.mMaxThreads = (uint32_t)atoi(optarg);
+                break;
+            case 2:
+                aArgs.mStep = (uint32_t)atoi(optarg);
+                break;
+            case 3:
+                aArgs.mThreshold = (uint32_t)atoi(optarg);
+                break;
+            case 4:
+                aArgs.mIncrements = (uint32_t)atoi(optarg);
+                break;
+            case 5:
+                aArgs.mWarmups = (uint32_t)atoi(optarg);
+                break;
+            case 6:
+                aArgs.mHotruns = (uint32_t)atoi(optarg);
+                break;
+            case 'h':
+                BenchCounter_printUsage(argv[0]);
+                return 0;
+            case '?':
+                BenchCounter_printUsage(argv[0]);
+                return 1;
+            default:
+                break;
+            }
+        }
+
+        return BenchCounter_sweepThreads(&aArgs);
+    }
+    else if (strcmp(aSubcommandPtr, "sweep_threshold") == 0)
+    {
+        tBenchCounter_sweepThresholdArgs aArgs = {
+            .mNumThreads = 8,
+            .mStartThreshold = 1,
+            .mSteps = 16,
+            .mIncrements = 100000,
+            .mWarmups = 15,
+            .mHotruns = 30};
+
+        static struct option aLongOptions[] = {
+            {"num-threads", required_argument, 0, 0},
+            {"start-threshold", required_argument, 0, 1},
+            {"steps", required_argument, 0, 2},
+            {"increments", required_argument, 0, 3},
+            {"warmups", required_argument, 0, 4},
+            {"hotruns", required_argument, 0, 5},
+            {"help", no_argument, 0, 'h'},
+            {0, 0, 0, 0}};
+
+        int aOptionIndex = 0;
+        int aC;
+        optind = 2; // Skip program name and subcommand
+
+        while ((aC = getopt_long(argc, argv, "h", aLongOptions, &aOptionIndex)) != -1)
+        {
+            switch (aC)
+            {
+            case 0:
+                aArgs.mNumThreads = (uint32_t)atoi(optarg);
+                break;
+            case 1:
+                aArgs.mStartThreshold = (uint32_t)atoi(optarg);
+                break;
+            case 2:
+                aArgs.mSteps = (uint32_t)atoi(optarg);
+                break;
+            case 3:
+                aArgs.mIncrements = (uint32_t)atoi(optarg);
+                break;
+            case 4:
+                aArgs.mWarmups = (uint32_t)atoi(optarg);
+                break;
+            case 5:
+                aArgs.mHotruns = (uint32_t)atoi(optarg);
+                break;
+            case 'h':
+                BenchCounter_printUsage(argv[0]);
+                return 0;
+            case '?':
+                BenchCounter_printUsage(argv[0]);
+                return 1;
+            default:
+                break;
+            }
+        }
+
+        return BenchCounter_sweepThreshold(&aArgs);
+    }
+    else
+    {
+        printf("Unknown subcommand: %s\n\n", aSubcommandPtr);
+        BenchCounter_printUsage(argv[0]);
+        return 1;
+    }
 }
