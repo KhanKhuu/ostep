@@ -156,7 +156,7 @@ uint32_t BenchCounter_benchApproximateCounter(uint8_t iNumThreads,
                                               uint32_t iNumIncrements,
                                               uint32_t iNumWarmups,
                                               uint32_t iNumHotRuns,
-                                              FILE *iOutputFile)
+                                              FILE *iOutputFilePtr)
 {
     uint32_t aGlobalCount;
     uint32_t aRun;
@@ -219,7 +219,7 @@ uint32_t BenchCounter_benchApproximateCounter(uint8_t iNumThreads,
             aRuntime = aT1 - aT0;
             sBenchCounter_DUTs[aDut].mInterfacePtr->mGetPtr(aCounterPtr,
                                                             &aGlobalCount);
-            fprintf(iOutputFile, "%s,%u,%u,%f,%u\n", aCounterNames[aDut], iNumThreads, iThreshold, aRuntime, aGlobalCount);
+            fprintf(iOutputFilePtr, "%s,%u,%u,%f,%u\n", aCounterNames[aDut], iNumThreads, iThreshold, aRuntime, aGlobalCount);
 
             sBenchCounter_DUTs[aDut].mInterfacePtr->mResetPtr(aCounterPtr);
         }
@@ -238,58 +238,59 @@ int main(int argc, const char **argv)
     printf("Welcome to Concurrent Counter Driver\n");
 
     // Parameters for benchmark
-    uint32_t iThreshold = 4096;
-    uint32_t iNumHotRuns = 30;
-    uint8_t threadCounts[] = {1, 2, 4, 8, 16};
-    int numThreadSweeps = sizeof(threadCounts) / sizeof(threadCounts[0]);
+    uint32_t aThreshold = 4096;
+    uint32_t aNumHotRuns = 30;
+    uint8_t aThreadCounts[] = {1, 2, 4, 8, 16};
+    int aNumThreadSweeps = sizeof(aThreadCounts) / sizeof(aThreadCounts[0]);
 
     // Get current wall-clock time for folder and file naming
-    time_t rawtime;
-    struct tm *timeinfo;
-    char timestamp[64];
-    char folder_name[128];
-    char filename[256];
-    char filepath[384];
+    time_t aRawtime;
+    struct tm *aTimeinfoPtr;
+    char aTimestamp[64];
+    char aFolderName[128];
+    char aFilename[256];
+    char aFilepath[384];
+    FILE *aOutputFilePtr;
 
-    time(&rawtime);
-    timeinfo = localtime(&rawtime);
-    strftime(timestamp, sizeof(timestamp), "%Y%m%d_%H%M%S", timeinfo);
+    time(&aRawtime);
+    aTimeinfoPtr = localtime(&aRawtime);
+    strftime(aTimestamp, sizeof(aTimestamp), "%Y%m%d_%H%M%S", aTimeinfoPtr);
 
     // Create benchmark folder
-    snprintf(folder_name, sizeof(folder_name), "benchmark_%s", timestamp);
-    if (mkdir(folder_name, 0755) != 0)
+    snprintf(aFolderName, sizeof(aFolderName), "benchmark_%s", aTimestamp);
+    if (mkdir(aFolderName, 0755) != 0)
     {
         perror("Failed to create benchmark directory");
         return 1;
     }
 
     // Create CSV filename with parameters (removed threads since it varies)
-    snprintf(filename, sizeof(filename), "bench_threshold%u_hotruns%u.csv",
-             iThreshold, iNumHotRuns);
-    snprintf(filepath, sizeof(filepath), "%s/%s", folder_name, filename);
+    snprintf(aFilename, sizeof(aFilename), "bench_threshold%u_hotruns%u.csv",
+             aThreshold, aNumHotRuns);
+    snprintf(aFilepath, sizeof(aFilepath), "%s/%s", aFolderName, aFilename);
 
     // Open CSV file for writing
-    FILE *output_file = fopen(filepath, "w");
-    if (output_file == NULL)
+    aOutputFilePtr = fopen(aFilepath, "w");
+    if (aOutputFilePtr == NULL)
     {
         perror("Failed to create output file");
         return 1;
     }
 
     // Write CSV header
-    fprintf(output_file, "counter,n_threads,threshold,time (ms),final_count\n");
+    fprintf(aOutputFilePtr, "counter,n_threads,threshold,time (ms),final_count\n");
 
     // Run parameter sweep across different thread counts
-    for (int i = 0; i < numThreadSweeps; i++)
+    for (int i = 0; i < aNumThreadSweeps; i++)
     {
-        printf("Running benchmark with %u threads...\n", threadCounts[i]);
-        BenchCounter_benchApproximateCounter(threadCounts[i], iThreshold, 1000000, 15, iNumHotRuns, output_file);
-        fflush(output_file); // Ensure data is written after each run
+        printf("Running benchmark with %u threads...\n", aThreadCounts[i]);
+        BenchCounter_benchApproximateCounter(aThreadCounts[i], aThreshold, 1000000, 15, aNumHotRuns, aOutputFilePtr);
+        fflush(aOutputFilePtr); // Ensure data is written after each run
     }
 
     // Close file and cleanup
-    fclose(output_file);
+    fclose(aOutputFilePtr);
 
-    printf("Parameter sweep completed. Results written to: %s\n", filepath);
+    printf("Parameter sweep completed. Results written to: %s\n", aFilepath);
     return 0;
 }
