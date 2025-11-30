@@ -3,6 +3,8 @@
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
+#include <sys/stat.h>
 #include <time.h>
 
 #include <ApproximateCounter.h>
@@ -153,7 +155,8 @@ uint32_t BenchCounter_benchApproximateCounter(uint8_t iNumThreads,
                                               uint32_t iThreshold,
                                               uint32_t iNumIncrements,
                                               uint32_t iNumWarmups,
-                                              uint32_t iNumHotRuns)
+                                              uint32_t iNumHotRuns,
+                                              FILE *iOutputFile)
 {
     uint32_t aGlobalCount;
     uint32_t aRun;
@@ -168,6 +171,9 @@ uint32_t BenchCounter_benchApproximateCounter(uint8_t iNumThreads,
     tCounter_instance aBasePtr;
     tCounter_instance *aCounterPtr;
     tApproximateCounter_options aOptions;
+
+    // Counter type descriptors
+    const char *aCounterNames[] = {"approximate", "traditional"};
 
     for (aDut = kBenchCounter_idxApprox; aDut < kBenchCounter_idxCount; ++aDut)
     {
@@ -213,7 +219,7 @@ uint32_t BenchCounter_benchApproximateCounter(uint8_t iNumThreads,
             aRuntime = aT1 - aT0;
             sBenchCounter_DUTs[aDut].mInterfacePtr->mGetPtr(aCounterPtr,
                                                             &aGlobalCount);
-            printf("Global Count: %u\nRun Time: %f\n", aGlobalCount, aRuntime);
+            fprintf(iOutputFile, "%s,%u,%u,%f,%u\n", aCounterNames[aDut], iNumThreads, iThreshold, aRuntime, aGlobalCount);
 
             sBenchCounter_DUTs[aDut].mInterfacePtr->mResetPtr(aCounterPtr);
         }
@@ -230,6 +236,60 @@ uint32_t BenchCounter_benchApproximateCounter(uint8_t iNumThreads,
 int main(int argc, const char **argv)
 {
     printf("Welcome to Concurrent Counter Driver\n");
-    BenchCounter_benchApproximateCounter(8, 1024, 1000000, 15, 30);
+
+    // Parameters for benchmark
+    uint32_t iThreshold = 4096;
+    uint32_t iNumHotRuns = 30;
+    uint8_t threadCounts[] = {1, 2, 4, 8, 16};
+    int numThreadSweeps = sizeof(threadCounts) / sizeof(threadCounts[0]);
+
+    // Get current wall-clock time for folder and file naming
+    time_t rawtime;
+    struct tm *timeinfo;
+    char timestamp[64];
+    char folder_name[128];
+    char filename[256];
+    char filepath[384];
+
+    time(&rawtime);
+    timeinfo = localtime(&rawtime);
+    strftime(timestamp, sizeof(timestamp), "%Y%m%d_%H%M%S", timeinfo);
+
+    // Create benchmark folder
+    snprintf(folder_name, sizeof(folder_name), "benchmark_%s", timestamp);
+    if (mkdir(folder_name, 0755) != 0)
+    {
+        perror("Failed to create benchmark directory");
+        return 1;
+    }
+
+    // Create CSV filename with parameters (removed threads since it varies)
+    snprintf(filename, sizeof(filename), "bench_threshold%u_hotruns%u.csv",
+             iThreshold, iNumHotRuns);
+    snprintf(filepath, sizeof(filepath), "%s/%s", folder_name, filename);
+
+    // Open CSV file for writing
+    FILE *output_file = fopen(filepath, "w");
+    if (output_file == NULL)
+    {
+        perror("Failed to create output file");
+        return 1;
+    }
+
+    // Write CSV header
+    fprintf(output_file, "counter,n_threads,threshold,time (ms),final_count\n");
+
+    // Run parameter sweep across different thread counts
+    for (int i = 0; i < numThreadSweeps; i++)
+    {
+        printf("Running benchmark with %u threads...\n", threadCounts[i]);
+        BenchCounter_benchApproximateCounter(threadCounts[i], iThreshold, 1000000, 15, iNumHotRuns, output_file);
+        fflush(output_file); // Ensure data is written after each run
+    }
+
+    // Close file and cleanup
+    fclose(output_file);
+
+    printf("Parameter sweep completed. Results written to: %s\n", filepath);
     return 0;
 }
