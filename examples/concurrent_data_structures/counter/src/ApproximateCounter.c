@@ -47,7 +47,7 @@ static tCounter_instance *ApproximateCounter_create(const tCounter_instance *iBa
     {
         // use defaults
         aThreshold = 1024;
-        aThread = 8;
+        aThreads = 8;
     }
 
     // allocate approximate counter instance
